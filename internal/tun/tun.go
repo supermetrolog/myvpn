@@ -23,7 +23,6 @@ func CreateTun(ip string) (*water.Interface, error) {
 	log.Printf("Назначаем IP адресс: %s, для созданного интерфейса: %s\n", ip, iface.Name())
 
 	cmd := fmt.Sprintf("ip addr add %s/24 dev %s", ip, iface.Name())
-	//cmd := fmt.Sprintf("sudo ifconfig %s %s netmask 255.255.255.0", iface.Name(), ip)
 	out, err := command.RunCommand(cmd)
 	if err != nil {
 		log.Println(out)

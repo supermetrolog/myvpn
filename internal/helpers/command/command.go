@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"fmt"
+	"golang.org/x/net/ipv4"
 	"log"
 	"os/exec"
 )
@@ -24,4 +25,16 @@ func RunCommand(cmd string) (string, error) {
 	}
 
 	return stdout.String(), err
+}
+
+func WritePacket(frame []byte) {
+	header, err := ipv4.ParseHeader(frame)
+	if err != nil {
+		fmt.Println("write packet err:", err)
+	} else {
+		fmt.Println("SRC:", header.Src)
+		fmt.Println("DST:", header.Dst)
+		fmt.Println("ID:", header.ID)
+		fmt.Println("CHECKSUM:", header.Checksum)
+	}
 }
