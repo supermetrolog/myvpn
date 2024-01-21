@@ -1,7 +1,22 @@
 version: '3.9'
 
 services:
-  go:
+  server:
+    build:
+      dockerfile: Dockerfile
+      context: ./docker/go
+    ports:
+      - "9090:9090"
+    privileged: true
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - .:/opt/app
+    networks:
+      src_server:
+      dst_server:
+
+  client:
     build:
       dockerfile: Dockerfile
       context: ./docker/go
@@ -10,3 +25,10 @@ services:
       - /dev/net/tun:/dev/net/tun
     volumes:
       - .:/opt/app
+    networks:
+      src_server:
+
+
+networks:
+  src_server:
+  dst_server:
