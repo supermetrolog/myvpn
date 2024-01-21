@@ -1,0 +1,12 @@
+version: '3.9'
+
+services:
+  go:
+    build:
+      dockerfile: Dockerfile
+      context: ./docker/go
+    privileged: true
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - .:/opt/app
