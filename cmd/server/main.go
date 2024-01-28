@@ -11,11 +11,14 @@ import (
 	"golang.org/x/net/ipv4"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+)
+
+const (
+	MTU = 1500
 )
 
 type Forwarder struct {
@@ -24,10 +27,34 @@ type Forwarder struct {
 }
 
 func main() {
-	tunIpAddress := "192.168.1.54"
-
-	iface, err := tun.CreateTun(tunIpAddress)
+	iface, err := tun.CreateTun("10.1.1.1", MTU)
 	checkerr.CheckErr("create tun iface error", err)
+
+	log.Printf("Назначаем форвардинг для созданного интерфейса: %s\n", iface.Name())
+
+	cmd := fmt.Sprintf("sysctl -w net.ipv4.ip_forward=1")
+	out, err := command.RunCommand(cmd)
+	if err != nil {
+		checkerr.CheckErr(out, err)
+	}
+
+	cmd = fmt.Sprintf("iptables -t nat -A POSTROUTING -s 10.1.1.0/24 ! -d 10.1.1.0/24 -m comment --comment 'vpndemo' -j MASQUERADE")
+	out, err = command.RunCommand(cmd)
+	if err != nil {
+		checkerr.CheckErr(out, err)
+	}
+
+	cmd = fmt.Sprintf("iptables -A FORWARD -s 10.1.1.0/24 -m state --state RELATED,ESTABLISHED -j ACCEPT")
+	out, err = command.RunCommand(cmd)
+	if err != nil {
+		checkerr.CheckErr(out, err)
+	}
+
+	cmd = fmt.Sprintf("iptables -A FORWARD -d 10.1.1.0/24 -j ACCEPT")
+	out, err = command.RunCommand(cmd)
+	if err != nil {
+		checkerr.CheckErr(out, err)
+	}
 
 	conn := createConn()
 	defer func(conn *net.UDPConn) {
@@ -37,9 +64,8 @@ func main() {
 
 	forwarder := &Forwarder{localConn: conn, connCache: cache.New(30*time.Minute, 10*time.Minute)}
 
-	go runTestServer("192.168.1.54")
-	go listenClient(forwarder, conn, iface)
-	go listenIface(forwarder, iface, conn)
+	go listenClient(forwarder, iface)
+	go listenIface(forwarder, iface)
 
 	termSignal := make(chan os.Signal, 1)
 	signal.Notify(termSignal, os.Interrupt, syscall.SIGTERM)
@@ -47,54 +73,40 @@ func main() {
 	fmt.Println("closing")
 }
 
-func runTestServer(ip string) {
-	http.HandleFunc("/hi", func(writer http.ResponseWriter, request *http.Request) {
-		writer.Write([]byte(fmt.Sprintf("hi %s\n", request.RemoteAddr)))
-		return
-	})
-	err := http.ListenAndServe(fmt.Sprintf("%s:8080", ip), nil)
-	if err != nil {
-		log.Println(err)
-	}
-}
-
-func listenIface(forwarder *Forwarder, iface *water.Interface, conn *net.UDPConn) {
-	buf := make([]byte, 2000)
+func listenIface(forwarder *Forwarder, iface *water.Interface) {
+	buf := make([]byte, MTU)
 
 	for {
 		n, err := iface.Read(buf)
-		log.Printf("Readed from iface %d", n)
+		log.Printf("READED FROM INTERFACE %d", n)
 		checkerr.CheckErr("read from iface error", err)
 
 		if n == 0 {
 			continue
 		}
 
-		//_, err = conn.Write(buf[:n])
-		//checkerr.CheckErr("write to conn error", err)
-
 		header, err := ipv4.ParseHeader(buf[:n])
 		srcAddr, dstAddr := header.Src.String(), header.Dst.String()
 
 		key := fmt.Sprintf("%v->%v", dstAddr, srcAddr)
+
 		log.Println("key ", key, forwarder.connCache.Items())
+
 		v, ok := forwarder.connCache.Get(key)
 		if ok {
-			// encrypt data
 			_, err = forwarder.localConn.WriteToUDP(buf[:n], v.(*net.UDPAddr))
 			checkerr.CheckErr("write to conn error", err)
 		}
 
-		log.Println("START - incoming packet from INTERFACE")
 		command.WritePacket(buf[:n])
-		log.Println("DONE - incoming packet from INTERFACE")
 	}
 }
 
-func listenClient(forwarder *Forwarder, conn *net.UDPConn, iface *water.Interface) {
+func listenClient(forwarder *Forwarder, iface *water.Interface) {
 	for {
-		buf := make([]byte, 2000)
-		n, addr, err := conn.ReadFromUDP(buf)
+		buf := make([]byte, MTU)
+		n, addr, err := forwarder.localConn.ReadFromUDP(buf)
+		log.Printf("READED FROM UDP TUNNEL %d", n)
 		checkerr.CheckErr("read from udp failed", err)
 
 		if !waterutil.IsIPv4(buf) {
@@ -106,9 +118,7 @@ func listenClient(forwarder *Forwarder, conn *net.UDPConn, iface *water.Interfac
 
 		log.Printf("UDP addr from conn. IP: %s, Port: %d", addr.IP.String(), addr.Port)
 
-		log.Println("START - incoming packet from TUNNEL")
 		command.WritePacket(buf[:n])
-		log.Println("DONE - incoming packet from TUNNEL")
 
 		header, err := ipv4.ParseHeader(buf[:n])
 		srcAddr, dstAddr := header.Src.String(), header.Dst.String()

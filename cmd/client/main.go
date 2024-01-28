@@ -13,9 +13,57 @@ import (
 	"syscall"
 )
 
+const (
+	MTU = 1330
+)
+
 func main() {
-	iface, err := tun.CreateTun("192.168.1.12")
+	iface, err := tun.CreateTun("10.1.1.5", MTU)
 	checkerr.CheckErr("create tun iface error", err)
+
+	log.Printf("Назначаем форвардинг для созданного интерфейса: %s\n", iface.Name())
+
+	cmd := fmt.Sprintf("sysctl -w net.ipv4.ip_forward=1")
+	out, err := command.RunCommand(cmd)
+	if err != nil {
+		checkerr.CheckErr(out, err)
+	}
+
+	cmd = fmt.Sprintf("iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE")
+	out, err = command.RunCommand(cmd)
+	if err != nil {
+		checkerr.CheckErr(out, err)
+	}
+
+	cmd = fmt.Sprintf("iptables -I FORWARD 1 -i tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT")
+	out, err = command.RunCommand(cmd)
+	if err != nil {
+		checkerr.CheckErr(out, err)
+	}
+
+	cmd = fmt.Sprintf("iptables -I FORWARD 1 -o tun0 -j ACCEPT")
+	out, err = command.RunCommand(cmd)
+	if err != nil {
+		checkerr.CheckErr(out, err)
+	}
+
+	//cmd = fmt.Sprintf("ip route add %s via eth0")
+	//out, err = command.RunCommand(cmd)
+	//if err != nil {
+	//	checkerr.CheckErr(out, err)
+	//}
+
+	//cmd = fmt.Sprintf("ip route del 0/1")
+	//out, err = command.RunCommand(cmd)
+	//if err != nil {
+	//	checkerr.CheckErr(out, err)
+	//}
+
+	//cmd = fmt.Sprintf("ip route del 128/1")
+	//out, err = command.RunCommand(cmd)
+	//if err != nil {
+	//	checkerr.CheckErr(out, err)
+	//}
 
 	conn, err := createConn()
 	checkerr.CheckErr("create udp conn error", err)
@@ -37,10 +85,11 @@ func createConn() (*net.UDPConn, error) {
 }
 
 func listenServer(conn *net.UDPConn, iface *water.Interface) {
-	buf := make([]byte, 2000)
+	buf := make([]byte, MTU)
 
 	for {
 		n, addr, err := conn.ReadFromUDP(buf)
+		log.Printf("READED FROM UDP TUNNEL %d", n)
 		checkerr.CheckErr("read from udp error", err)
 
 		_, err = iface.Write(buf[:n])
@@ -48,23 +97,20 @@ func listenServer(conn *net.UDPConn, iface *water.Interface) {
 
 		log.Printf("UDP addr from conn. IP: %s, Port: %d", addr.IP.String(), addr.Port)
 
-		log.Println("START - incoming packet from TUNNEL")
 		command.WritePacket(buf[:n])
-		log.Println("DONE - incoming packet from TUNNEL")
 	}
 }
 
 func listenIface(iface *water.Interface, conn *net.UDPConn) {
-	buf := make([]byte, 2000)
+	buf := make([]byte, MTU)
 
 	for {
 		n, err := iface.Read(buf)
+		log.Printf("READED FROM INTERFACE %d", n)
 		checkerr.CheckErr("read from iface error", err)
 		_, err = conn.Write(buf[:n])
 		checkerr.CheckErr("write to udp conn error", err)
 
-		log.Println("START - incoming packet from INTERFACE")
 		command.WritePacket(buf[:n])
-		log.Println("DONE - incoming packet from INTERFACE")
 	}
 }

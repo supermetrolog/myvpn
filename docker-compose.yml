@@ -1,12 +1,19 @@
 version: '3.9'
 
 services:
+  resource:
+    build:
+      dockerfile: Dockerfile
+      context: ./docker/go
+    volumes:
+      - .:/opt/app
+    networks:
+      dst_server:
+
   server:
     build:
       dockerfile: Dockerfile
       context: ./docker/go
-    ports:
-      - "9090:9090"
     privileged: true
     devices:
       - /dev/net/tun:/dev/net/tun
